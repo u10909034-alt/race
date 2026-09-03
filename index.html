@@ -34,7 +34,14 @@
   .moveBtns{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
   .moveBtns button{background:#3c6e91}
   .reset{background:#d85c5c}
-  .status{text-align:center;margin:12px 0;padding:10px;border-radius:12px;background:#f1f5f7;font-weight:800;min-height:42px}
+  .status{text-align:center;margin:12px 0 8px;padding:10px;border-radius:12px;background:#f1f5f7;font-weight:800;min-height:42px}
+  
+  /* 歷史紀錄區樣式 */
+  .log-container{background:#f8fbfd;border:1px solid #e1e7eb;border-radius:10px;padding:8px;max-height:110px;overflow-y:auto;font-size:12px;color:#5d6b75}
+  .log-title{font-size:11px;color:#8a99ad;margin-bottom:4px;font-weight:bold;display:flex;justify-content:space-between}
+  .log-item{padding:3px 0;border-bottom:1px solid #edf2f5}
+  .log-item:last-child{border-bottom:none}
+
   .legend{font-size:13px;color:#68757e;line-height:1.5;margin-top:12px}
   @media(max-width:850px){.layout{grid-template-columns:1fr}.cell{height:62px}.car{font-size:18px}}
 </style>
@@ -42,7 +49,7 @@
 <body>
 <div class="app">
   <h1>🏁 602 RACING GAME</h1>
-  <div class="subtitle">36 格・6 組競速｜答對就前進，踩中神秘格子會觸發隱藏效果！</div>
+  <div class="subtitle">36 格・6 組競速｜自動存檔紀錄，重新整理不遺失！</div>
 
   <div class="layout">
     <section class="board">
@@ -53,6 +60,13 @@
       <div class="teams" id="teams"></div>
       <div class="status" id="status">請選擇一組開始！</div>
 
+      <div class="log-title">
+        <span>📜 移動歷程 (自動儲存)</span>
+      </div>
+      <div class="log-container" id="logs">
+        <div class="log-item">無歷史紀錄</div>
+      </div>
+
       <div class="controls">
         <div class="moveBtns">
           <button onclick="moveSelected(1)">+1</button>
@@ -62,7 +76,7 @@
           <button onclick="moveSelected(5)">+5</button>
           <button onclick="moveSelected(6)">+6</button>
         </div>
-        <button class="reset" onclick="resetGame()">🔄 NEW GAME</button>
+        <button class="reset" onclick="resetGame()">🔄 NEW GAME (重置)</button>
       </div>
 
       <div class="legend">
@@ -75,22 +89,66 @@
 </div>
 
 <script>
-// 擴充至 6 組隊伍與對應 Emoji
 const emojis = ["🏎️","🚙","🚕","🚌","🚓","🚚"];
 const names = ["Team 1","Team 2","Team 3","Team 4","Team 5","Team 6"];
-
-// 設定隱藏的神秘格子位置（不安裝預先顯示的效果）
 const specialCells = [5, 9, 13, 17, 21, 24, 28, 31, 34];
 
 let pos = [0,0,0,0,0,0];
 let selected = 0;
 let gameOver = false;
+let logs = [];
+
+// 專屬 602 的存檔 Key 名稱，與 601 獨立不衝突
+const STORAGE_KEY = "602_racing_game_save";
+
+// 載入 localStorage 存檔
+function loadGameData(){
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if(saved){
+    try {
+      const data = JSON.parse(saved);
+      pos = data.pos || [0,0,0,0,0,0];
+      selected = data.selected || 0;
+      gameOver = data.gameOver || false;
+      logs = data.logs || [];
+    } catch(e) {
+      console.error("存檔讀取失敗", e);
+    }
+  }
+}
+
+// 儲存資料至 localStorage
+function saveGameData(){
+  const data = {
+    pos: pos,
+    selected: selected,
+    gameOver: gameOver,
+    logs: logs
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+// 紀錄與顯示歷史紀錄
+function addLog(msg){
+  const time = new Date().toLocaleTimeString('zh-TW', { hour12: false, hour: '2-digit', minute: '2-digit' });
+  logs.unshift(`[${time}] ${msg}`);
+  if(logs.length > 20) logs.pop();
+  renderLogs();
+}
+
+function renderLogs(){
+  const container = document.getElementById("logs");
+  if(logs.length === 0){
+    container.innerHTML = '<div class="log-item">無歷史紀錄</div>';
+    return;
+  }
+  container.innerHTML = logs.map(l => `<div class="log-item">${l}</div>`).join('');
+}
 
 function render(){
   const track = document.getElementById("track");
   track.innerHTML = "";
   
-  // 蛇行棋盤：由下往上、左右交錯
   let nums = [];
   for(let r=5; r>=0; r--){
     let row = Array.from({length:6}, (_,i) => r*6 + i + 1);
@@ -124,10 +182,17 @@ function render(){
   names.forEach((name, i) => {
     const d = document.createElement("div");
     d.className = "team" + (i === selected ? " active" : "");
-    d.onclick = () => { selected = i; render(); setStatus(`${names[i]} 已選取 🏎️`); };
+    d.onclick = () => { 
+      selected = i; 
+      render(); 
+      setStatus(`${names[i]} 已選取 🏎️`);
+      saveGameData();
+    };
     d.innerHTML = `<div class="teamrow"><span class="teamname">${emojis[i]} ${name}</span><span class="pos">${pos[i]}/36</span></div>`;
     teams.appendChild(d);
   });
+
+  renderLogs();
 }
 
 function setStatus(t){ document.getElementById("status").textContent = t; }
@@ -138,42 +203,60 @@ function moveSelected(n){
   const old = pos[i];
   let next = Math.min(36, old + n);
   pos[i] = next;
-  render();
-  setStatus(`${emojis[i]} ${names[i]} 前進 ${n} 格！到達 ${next} 格`);
+  
+  let statusMsg = `${emojis[i]} ${names[i]} 前進 ${n} 格！(到達 ${next} 格)`;
+  setStatus(statusMsg);
+  addLog(statusMsg);
 
-  // 踩到隱藏格子時，隨機產生前進或後退的效果 (1~3 格)
   if(specialCells.includes(next)){
     const isForward = Math.random() < 0.5;
-    const randomSteps = Math.floor(Math.random() * 3) + 1; // 隨機 1~3 格
+    const randomSteps = Math.floor(Math.random() * 3) + 1;
     const delta = isForward ? randomSteps : -randomSteps;
     
     const after = Math.max(1, Math.min(36, next + delta));
     pos[i] = after;
-    render();
+
+    const specialMsg = delta > 0
+      ? `🚀 幸運觸發神秘加速！額外前進 ${delta} 格 → 到達 ${after} 格`
+      : `⚠️ 踩空觸發神秘減速！後退 ${Math.abs(delta)} 格 → 到達 ${after} 格`;
 
     setTimeout(() => {
-      setStatus(delta > 0
-        ? `🚀 幸運觸發神秘加速！額外前進 ${delta} 格 → 到達 ${after} 格`
-        : `⚠️ 踩空觸發神秘減速！後退 ${Math.abs(delta)} 格 → 到達 ${after} 格`);
+      setStatus(specialMsg);
+      addLog(`${names[i]} ${specialMsg}`);
+      render();
+      saveGameData();
     }, 300);
   }
 
   if(pos[i] === 36){
     gameOver = true;
-    render();
-    setStatus(`🏆 ${names[i]} WIN! 抵達終點！`);
+    const winMsg = `🏆 ${names[i]} WIN! 抵達終點！`;
+    setStatus(winMsg);
+    addLog(winMsg);
   }
+
+  render();
+  saveGameData();
 }
 
 function resetGame(){
-  pos = [0,0,0,0,0,0];
-  selected = 0;
-  gameOver = false;
-  render();
-  setStatus("新比賽開始！請選擇一組 🏁");
+  if(confirm("確定要重置比賽嗎？進度與紀錄將會清空！")){
+    pos = [0,0,0,0,0,0];
+    selected = 0;
+    gameOver = false;
+    logs = [];
+    localStorage.removeItem(STORAGE_KEY);
+    render();
+    setStatus("新比賽開始！請選擇一組 🏁");
+  }
 }
 
+// 程式載入時先執行讀取
+loadGameData();
 render();
+if(logs.length > 0){
+  setStatus("已自動載入上次的比賽紀錄 🏁");
+}
 </script>
 </body>
 </html>
